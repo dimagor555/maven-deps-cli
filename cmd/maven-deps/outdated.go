@@ -3,6 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
+	"sort"
+	"strings"
 	"sync"
 
 	"dimagor555.pro/maven-deps/maven"
@@ -98,38 +101,36 @@ func runOutdated(cmd *cobra.Command, _ []string) error {
 		}(item.idx, item.dep)
 	}
 
-	if jsonOutput {
-		wg.Wait()
-		close(ch)
-		collected := make(map[int]*outdatedResult)
-		for item := range ch {
-			if item.result != nil {
-				collected[item.idx] = item.result
-			}
-		}
-		var results []outdatedResult
-		for i := range deps {
-			if r, ok := collected[i]; ok {
-				results = append(results, *r)
-			}
-		}
-		printJSON(buildSummary(results))
-		return nil
-	}
-
 	go func() {
 		wg.Wait()
 		close(ch)
 	}()
 
+	total := len(withVersion)
+	done := 0
 	var results []outdatedResult
 	for item := range ch {
+		done++
+		if !jsonOutput {
+			fmt.Fprintf(os.Stderr, "\r%s", progressLine(done, total))
+		}
 		if item.result != nil {
 			results = append(results, *item.result)
-			r := item.result
-			fmt.Fprintf(cmd.OutOrStdout(), "%s:%s  %s → %s  %s\n",
-				r.GroupID, r.ArtifactID, r.Current, r.Latest, r.Upgrade)
 		}
+	}
+	if !jsonOutput && total > 0 {
+		fmt.Fprintf(os.Stderr, "\r%s\r", strings.Repeat(" ", 30))
+	}
+	sortResults(results)
+
+	if jsonOutput {
+		printJSON(buildSummary(results))
+		return nil
+	}
+
+	for _, r := range results {
+		fmt.Fprintf(cmd.OutOrStdout(), "%s:%s  %s → %s  %s\n",
+			r.GroupID, r.ArtifactID, r.Current, r.Latest, r.Upgrade)
 	}
 
 	if len(results) > 0 {
@@ -138,6 +139,36 @@ func runOutdated(cmd *cobra.Command, _ []string) error {
 			s.Total, s.Major, s.Minor, s.Patch)
 	}
 	return nil
+}
+
+func progressLine(done, total int) string {
+	return fmt.Sprintf("checking %d/%d...", done, total)
+}
+
+func upgradeOrder(t string) int {
+	switch version.UpgradeType(t) {
+	case version.Major:
+		return 0
+	case version.Minor:
+		return 1
+	case version.Patch:
+		return 2
+	default:
+		return 3
+	}
+}
+
+func sortResults(results []outdatedResult) {
+	sort.Slice(results, func(i, j int) bool {
+		oi := upgradeOrder(results[i].Upgrade)
+		oj := upgradeOrder(results[j].Upgrade)
+		if oi != oj {
+			return oi < oj
+		}
+		ki := results[i].GroupID + ":" + results[i].ArtifactID
+		kj := results[j].GroupID + ":" + results[j].ArtifactID
+		return ki < kj
+	})
 }
 
 func buildSummary(results []outdatedResult) outdatedSummary {

@@ -14,8 +14,9 @@ var (
 )
 
 var rootCmd = &cobra.Command{
-	Use:   "maven-deps",
-	Short: "Maven/Gradle dependency intelligence",
+	Use:     "maven-deps",
+	Short:   "Maven/Gradle dependency intelligence",
+	Version: "1.1.0",
 }
 
 func init() {

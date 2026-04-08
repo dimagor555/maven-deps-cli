@@ -7,6 +7,7 @@ Go CLI tool for Maven/Gradle dependency intelligence. Single binary, zero overhe
 ```bash
 go build -o maven-deps ./cmd/maven-deps   # Build
 go test ./...                               # Run all tests
+bash scripts/set-version.sh <version>      # Set version in all places
 ```
 
 ## Architecture
