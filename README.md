@@ -58,6 +58,23 @@ maven-deps list
 maven-deps outdated
 ```
 
+### `update` — bump catalog dependencies
+
+```bash
+maven-deps update patch   # only patch upgrades
+maven-deps update minor   # patch + minor
+maven-deps update major   # patch + minor + major
+```
+
+Scans `gradle/libs.versions.toml`, resolves latest versions, shows a preview
+and asks to confirm before writing. Edits are line-based and preserve
+formatting/comments. Shared `version.ref` entries are bumped to the minimum
+of their latest versions so all consumers stay compatible.
+
+Flags:
+- `--yes` — skip confirmation
+- `--force-dirty` — proceed even if the catalog has uncommitted changes
+
 ### `vulnerabilities` — check for known CVEs
 
 ```bash

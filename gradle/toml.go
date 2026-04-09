@@ -7,9 +7,13 @@ import (
 )
 
 type CatalogEntry struct {
-	GroupID    string
-	ArtifactID string
-	Version    string
+	GroupID       string
+	ArtifactID    string
+	Version       string
+	VersionRef    string
+	InlineVersion bool
+	Section       string
+	SourceAlias   string
 }
 
 type rawCatalog struct {
@@ -29,12 +33,16 @@ func ParseVersionCatalog(content string) map[string]CatalogEntry {
 
 	for alias, val := range raw.Libraries {
 		if e, ok := parseLibrary(val, versions); ok {
+			e.Section = "libraries"
+			e.SourceAlias = alias
 			entries[alias] = e
 		}
 	}
 
 	for alias, val := range raw.Plugins {
 		if e, ok := parsePlugin(val, versions); ok {
+			e.Section = "plugins"
+			e.SourceAlias = alias
 			entries["plugin-"+alias] = e
 		}
 	}
@@ -70,12 +78,13 @@ func parseModuleString(s string) (CatalogEntry, bool) {
 	entry := CatalogEntry{GroupID: parts[0], ArtifactID: parts[1]}
 	if len(parts) == 3 {
 		entry.Version = parts[2]
+		entry.InlineVersion = true
 	}
 	return entry, true
 }
 
 func parseLibraryMap(m map[string]interface{}, versions map[string]string) (CatalogEntry, bool) {
-	var groupID, artifactID, ver string
+	var groupID, artifactID string
 
 	if module, ok := getString(m, "module"); ok {
 		parts := strings.SplitN(module, ":", 2)
@@ -91,12 +100,18 @@ func parseLibraryMap(m map[string]interface{}, versions map[string]string) (Cata
 		artifactID = n
 	}
 
-	ver = resolveVersion(m, versions)
+	ver, ref, inline := resolveVersion(m, versions)
 
 	if groupID == "" || artifactID == "" {
 		return CatalogEntry{}, false
 	}
-	return CatalogEntry{GroupID: groupID, ArtifactID: artifactID, Version: ver}, true
+	return CatalogEntry{
+		GroupID:       groupID,
+		ArtifactID:    artifactID,
+		Version:       ver,
+		VersionRef:    ref,
+		InlineVersion: inline,
+	}, true
 }
 
 func parsePlugin(val interface{}, versions map[string]string) (CatalogEntry, bool) {
@@ -108,29 +123,31 @@ func parsePlugin(val interface{}, versions map[string]string) (CatalogEntry, boo
 	if !ok {
 		return CatalogEntry{}, false
 	}
-	ver := resolveVersion(m, versions)
+	ver, ref, inline := resolveVersion(m, versions)
 	return CatalogEntry{
-		GroupID:    id,
-		ArtifactID: id + ".gradle.plugin",
-		Version:    ver,
+		GroupID:       id,
+		ArtifactID:    id + ".gradle.plugin",
+		Version:       ver,
+		VersionRef:    ref,
+		InlineVersion: inline,
 	}, true
 }
 
-func resolveVersion(m map[string]interface{}, versions map[string]string) string {
+func resolveVersion(m map[string]interface{}, versions map[string]string) (string, string, bool) {
 	if vObj, ok := m["version"]; ok {
 		if s, ok := vObj.(string); ok {
-			return s
+			return s, "", true
 		}
 		if vm, ok := vObj.(map[string]interface{}); ok {
 			if ref, ok := getString(vm, "ref"); ok {
-				return versions[ref]
+				return versions[ref], ref, false
 			}
 		}
 	}
 	if vr, ok := getString(m, "version.ref"); ok {
-		return versions[vr]
+		return versions[vr], vr, false
 	}
-	return ""
+	return "", "", false
 }
 
 func getString(m map[string]interface{}, key string) (string, bool) {

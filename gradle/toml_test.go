@@ -124,3 +124,87 @@ gson = "com.google.code.gson:gson:2.11.0"
 		t.Errorf("unexpected: %+v", e)
 	}
 }
+
+func TestParseVersionCatalog_WhenVersionRef_StoresRefAndNotInline(t *testing.T) {
+	content := `
+[versions]
+ktor = "3.1.1"
+
+[libraries]
+ktor-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+`
+	entries := ParseVersionCatalog(content)
+	e := entries["ktor-core"]
+	if e.VersionRef != "ktor" {
+		t.Errorf("VersionRef = %q, want ktor", e.VersionRef)
+	}
+	if e.InlineVersion {
+		t.Errorf("InlineVersion = true, want false")
+	}
+	if e.Section != "libraries" {
+		t.Errorf("Section = %q, want libraries", e.Section)
+	}
+	if e.SourceAlias != "ktor-core" {
+		t.Errorf("SourceAlias = %q, want ktor-core", e.SourceAlias)
+	}
+}
+
+func TestParseVersionCatalog_WhenInlineMap_MarksInline(t *testing.T) {
+	content := `
+[libraries]
+gson = { module = "com.google.code.gson:gson", version = "2.11.0" }
+`
+	entries := ParseVersionCatalog(content)
+	e := entries["gson"]
+	if !e.InlineVersion {
+		t.Errorf("InlineVersion = false, want true")
+	}
+	if e.VersionRef != "" {
+		t.Errorf("VersionRef = %q, want empty", e.VersionRef)
+	}
+}
+
+func TestParseVersionCatalog_WhenInlineString_MarksInline(t *testing.T) {
+	content := `
+[libraries]
+gson = "com.google.code.gson:gson:2.11.0"
+`
+	entries := ParseVersionCatalog(content)
+	e := entries["gson"]
+	if !e.InlineVersion {
+		t.Errorf("InlineVersion = false, want true")
+	}
+}
+
+func TestParseVersionCatalog_WhenPlugin_StoresSectionAndSourceAlias(t *testing.T) {
+	content := `
+[versions]
+kotlin = "2.1.0"
+
+[plugins]
+kotlin-jvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
+`
+	entries := ParseVersionCatalog(content)
+	e := entries["plugin-kotlin-jvm"]
+	if e.Section != "plugins" {
+		t.Errorf("Section = %q, want plugins", e.Section)
+	}
+	if e.SourceAlias != "kotlin-jvm" {
+		t.Errorf("SourceAlias = %q, want kotlin-jvm", e.SourceAlias)
+	}
+	if e.VersionRef != "kotlin" {
+		t.Errorf("VersionRef = %q, want kotlin", e.VersionRef)
+	}
+}
+
+func TestParseVersionCatalog_WhenPluginInlineVersion_MarksInline(t *testing.T) {
+	content := `
+[plugins]
+foo = { id = "com.foo", version = "1.0.0" }
+`
+	entries := ParseVersionCatalog(content)
+	e := entries["plugin-foo"]
+	if !e.InlineVersion {
+		t.Errorf("InlineVersion = false, want true")
+	}
+}
