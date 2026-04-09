@@ -65,9 +65,39 @@ maven-deps outdated
 
 Output: `group:artifact  current -> latest  upgrade-type`
 
-After showing results, ask the user if they want to update. If yes, edit `gradle/libs.versions.toml` or `build.gradle.kts` directly.
+After showing results, ask the user if they want to update. If yes, prefer `maven-deps update` (see below) — it edits `gradle/libs.versions.toml` for you. Only edit files manually when the user explicitly asks or when the change is not expressible through the catalog.
 
 Do NOT suggest alpha/beta/RC/milestone/snapshot versions unless the user explicitly asks for unstable versions.
+
+### update — bump catalog dependencies automatically
+
+Scans `gradle/libs.versions.toml`, resolves latest versions, previews all changes, asks for confirmation, then applies line-based edits that preserve formatting and comments.
+
+```bash
+maven-deps update patch   # only patch upgrades
+maven-deps update minor   # patch + minor
+maven-deps update major   # patch + minor + major
+```
+
+The upgrade level is positional and nested: `minor` includes patch, `major` includes minor and patch.
+
+Shared `version.ref` entries (multiple aliases pointing at the same version key) are bumped to `min(latest)` across all consumers so nothing breaks. If any consumer has a latest that the chosen level cannot cover, the whole ref stays at its current value.
+
+Blocks by default if `gradle/libs.versions.toml` has uncommitted changes in git. Pass `--force-dirty` to override.
+
+Flags:
+- `--yes` — skip the interactive confirmation prompt
+- `--force-dirty` — proceed even if the catalog is dirty in git
+
+Examples:
+
+```bash
+maven-deps update patch --yes              # safest: only patch bumps, no prompt
+maven-deps update minor                    # interactive, asks before writing
+maven-deps update major --force-dirty      # allow running on a dirty working tree
+```
+
+Only touches `gradle/libs.versions.toml`. For inline dependencies in `build.gradle.kts` (outside the catalog), edit manually.
 
 ## JSON output
 
@@ -75,7 +105,8 @@ All commands support `--json` for machine-readable output.
 
 ## Workflow: updating dependencies
 
-1. Run `maven-deps outdated`
+1. Run `maven-deps outdated` to see what's behind
 2. Present results as a table
-3. If user confirms, edit version files (`gradle/libs.versions.toml` or `build.gradle.kts`)
-4. Do NOT include build/test steps — those are handled by the project's own CLAUDE.md
+3. If user confirms, run `maven-deps update <level>` (patch/minor/major) — it previews and writes the catalog
+4. For inline deps outside `libs.versions.toml`, edit `build.gradle.kts` directly
+5. Do NOT include build/test steps — those are handled by the project's own CLAUDE.md
