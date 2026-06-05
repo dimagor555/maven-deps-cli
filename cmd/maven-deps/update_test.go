@@ -3,12 +3,14 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"dimagor555.pro/maven-deps/gradle"
 	"dimagor555.pro/maven-deps/maven"
 	"dimagor555.pro/maven-deps/update"
 )
@@ -24,6 +26,58 @@ func (f *fakeResolver) Resolve(_ context.Context, groupID, artifactID string) (m
 		ArtifactID: artifactID,
 		Versions:   f.versions[key],
 	}, nil
+}
+
+type failingResolver struct {
+	err error
+}
+
+func (f *failingResolver) Resolve(_ context.Context, _, _ string) (maven.Metadata, error) {
+	return maven.Metadata{}, f.err
+}
+
+func TestExecuteUpdate_ResolveFails_ReturnsErrorNotNothingToUpdate(t *testing.T) {
+	root := initUpdateRepo(t, `[versions]
+ktor = "3.0.0"
+
+[libraries]
+ktor-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
+`)
+	catalog := filepath.Join(root, "gradle", "libs.versions.toml")
+	resolver := &failingResolver{err: errors.New("connection reset by peer")}
+	var out bytes.Buffer
+	err := executeUpdate(context.Background(), &out, strings.NewReader(""), root, catalog, resolver, update.LevelMinor, true, false)
+	if err == nil {
+		t.Fatal("expected error when resolve fails, got nil")
+	}
+	if strings.Contains(out.String(), "nothing to update") {
+		t.Errorf("must not claim 'nothing to update' when resolve failed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "WARNING") {
+		t.Errorf("expected WARNING about failed resolves, got:\n%s", out.String())
+	}
+}
+
+func TestResolveUpgrades_NotFound_NotTreatedAsFailure(t *testing.T) {
+	entries := map[string]gradle.CatalogEntry{
+		"a": {SourceAlias: "a", GroupID: "g", ArtifactID: "a", Version: "1.0.0", VersionRef: "a"},
+	}
+	resolver := &failingResolver{err: maven.NewNotFoundError("any repository")}
+	_, failures := resolveUpgrades(context.Background(), entries, resolver)
+	if len(failures) != 0 {
+		t.Errorf("not-found must not be reported as failure, got %d", len(failures))
+	}
+}
+
+func TestResolveUpgrades_TransientError_ReportedAsFailure(t *testing.T) {
+	entries := map[string]gradle.CatalogEntry{
+		"a": {SourceAlias: "a", GroupID: "g", ArtifactID: "a", Version: "1.0.0", VersionRef: "a"},
+	}
+	resolver := &failingResolver{err: errors.New("timeout")}
+	_, failures := resolveUpgrades(context.Background(), entries, resolver)
+	if len(failures) != 1 {
+		t.Fatalf("transient error must be reported, got %d", len(failures))
+	}
 }
 
 func TestExecuteUpdate_AppliesRefAndInlineChanges(t *testing.T) {

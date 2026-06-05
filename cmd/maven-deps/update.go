@@ -77,11 +77,18 @@ func executeUpdate(
 	}
 	content := string(data)
 	entries := gradle.ParseVersionCatalog(content)
-	upgrades := resolveUpgrades(ctx, entries, resolver)
+	upgrades, failures := resolveUpgrades(ctx, entries, resolver)
 	plan := update.Plan(upgrades, level)
 	if len(plan.VersionRefUpdates) == 0 && len(plan.InlineUpdates) == 0 {
+		if len(failures) > 0 {
+			printResolveFailures(w, failures)
+			return errResolveFailures
+		}
 		fmt.Fprintln(w, "nothing to update")
 		return nil
+	}
+	if len(failures) > 0 {
+		printResolveFailures(w, failures)
 	}
 	if err := ensureGitClean(root, catalogPath, forceDirty); err != nil {
 		return err
@@ -98,7 +105,13 @@ func executeUpdate(
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(catalogPath, []byte(newContent), 0o644)
+	if err := os.WriteFile(catalogPath, []byte(newContent), 0o644); err != nil {
+		return err
+	}
+	if len(failures) > 0 {
+		return errResolveFailures
+	}
+	return nil
 }
 
 func ensureGitClean(root, catalogPath string, forceDirty bool) error {
@@ -125,4 +138,3 @@ func printUpdatePreview(w io.Writer, plan update.Result) {
 	total := len(plan.VersionRefUpdates) + len(plan.InlineUpdates)
 	fmt.Fprintf(w, "\n%d changes\n", total)
 }
-

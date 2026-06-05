@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strings"
@@ -13,7 +14,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const maxConcurrency = 20
+const maxConcurrency = 4
 
 var outdatedCmd = &cobra.Command{
 	Use:   "outdated",
@@ -35,11 +36,25 @@ type outdatedSummary struct {
 	Major   int              `json:"major"`
 	Minor   int              `json:"minor"`
 	Patch   int              `json:"patch"`
+	Failed  []failedResult   `json:"failed,omitempty"`
+}
+
+type failedResult struct {
+	GroupID    string `json:"groupId"`
+	ArtifactID string `json:"artifactId"`
+	Error      string `json:"error"`
 }
 
 type indexedResult struct {
 	idx    int
 	result *outdatedResult
+	failed *resolveFailure
+}
+
+type resolveFailure struct {
+	GroupID    string
+	ArtifactID string
+	Err        error
 }
 
 func runOutdated(cmd *cobra.Command, _ []string) error {
@@ -78,7 +93,15 @@ func runOutdated(cmd *cobra.Command, _ []string) error {
 
 			meta, err := resolver.Resolve(ctx, dep.GroupID, dep.ArtifactID)
 			if err != nil {
-				ch <- indexedResult{idx: idx}
+				if maven.IsNotFound(err) {
+					ch <- indexedResult{idx: idx}
+					return
+				}
+				ch <- indexedResult{idx: idx, failed: &resolveFailure{
+					GroupID:    dep.GroupID,
+					ArtifactID: dep.ArtifactID,
+					Err:        err,
+				}}
 				return
 			}
 			latest := version.FindLatestForCurrent(meta.Versions, dep.Version)
@@ -109,6 +132,7 @@ func runOutdated(cmd *cobra.Command, _ []string) error {
 	total := len(withVersion)
 	done := 0
 	var results []outdatedResult
+	var failures []resolveFailure
 	for item := range ch {
 		done++
 		if !jsonOutput {
@@ -117,6 +141,9 @@ func runOutdated(cmd *cobra.Command, _ []string) error {
 		if item.result != nil {
 			results = append(results, *item.result)
 		}
+		if item.failed != nil {
+			failures = append(failures, *item.failed)
+		}
 	}
 	if !jsonOutput && total > 0 {
 		fmt.Fprintf(os.Stderr, "\r%s\r", strings.Repeat(" ", 30))
@@ -124,7 +151,12 @@ func runOutdated(cmd *cobra.Command, _ []string) error {
 	sortResults(results)
 
 	if jsonOutput {
-		printJSON(buildSummary(results))
+		summary := buildSummary(results)
+		summary.Failed = toFailedResults(failures)
+		printJSON(summary)
+		if len(failures) > 0 {
+			return errResolveFailures
+		}
 		return nil
 	}
 
@@ -138,7 +170,33 @@ func runOutdated(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "\n%d outdated (%d major, %d minor, %d patch)\n",
 			s.Total, s.Major, s.Minor, s.Patch)
 	}
+
+	if len(failures) > 0 {
+		printResolveFailures(cmd.ErrOrStderr(), failures)
+		return errResolveFailures
+	}
 	return nil
+}
+
+var errResolveFailures = fmt.Errorf("some dependencies could not be resolved")
+
+func toFailedResults(failures []resolveFailure) []failedResult {
+	out := make([]failedResult, 0, len(failures))
+	for _, f := range failures {
+		out = append(out, failedResult{
+			GroupID:    f.GroupID,
+			ArtifactID: f.ArtifactID,
+			Error:      f.Err.Error(),
+		})
+	}
+	return out
+}
+
+func printResolveFailures(w io.Writer, failures []resolveFailure) {
+	fmt.Fprintf(w, "\nWARNING: failed to resolve %d dependencies (results above may be incomplete):\n", len(failures))
+	for _, f := range failures {
+		fmt.Fprintf(w, "  %s:%s  %v\n", f.GroupID, f.ArtifactID, f.Err)
+	}
 }
 
 func progressLine(done, total int) string {

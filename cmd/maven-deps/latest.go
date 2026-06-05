@@ -34,6 +34,7 @@ type latestResult struct {
 	Version    string `json:"version"`
 	Stability  string `json:"stability"`
 	Error      string `json:"error,omitempty"`
+	failed     bool
 }
 
 func runLatest(cmd *cobra.Command, args []string) error {
@@ -67,7 +68,7 @@ func runLatest(cmd *cobra.Command, args []string) error {
 
 			meta, err := resolver.Resolve(ctx, groupID, artifactID)
 			if err != nil {
-				results[i] = latestResult{GroupID: groupID, ArtifactID: artifactID, Error: err.Error()}
+				results[i] = latestResult{GroupID: groupID, ArtifactID: artifactID, Error: err.Error(), failed: !maven.IsNotFound(err)}
 				return
 			}
 
@@ -87,8 +88,19 @@ func runLatest(cmd *cobra.Command, args []string) error {
 	}
 	wg.Wait()
 
+	anyFailed := false
+	for _, r := range results {
+		if r.failed {
+			anyFailed = true
+			break
+		}
+	}
+
 	if jsonOutput {
 		printJSON(results)
+		if anyFailed {
+			return errResolveFailures
+		}
 		return nil
 	}
 
@@ -98,6 +110,9 @@ func runLatest(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		fmt.Fprintf(cmd.OutOrStdout(), "%s:%s  %s  %s\n", r.GroupID, r.ArtifactID, r.Version, r.Stability)
+	}
+	if anyFailed {
+		return errResolveFailures
 	}
 	return nil
 }

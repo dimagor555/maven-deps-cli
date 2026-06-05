@@ -102,7 +102,17 @@ func resolveAll(ctx context.Context, repos []Repository, groupID, artifactID str
 	}
 
 	if len(successful) == 0 {
-		return Metadata{}, fmt.Errorf("artifact %s:%s not found in any repository", groupID, artifactID)
+		var fetchErr error
+		for _, r := range results {
+			if _, ok := r.err.(*notFoundError); !ok && r.err != nil {
+				fetchErr = r.err
+				break
+			}
+		}
+		if fetchErr != nil {
+			return Metadata{}, fmt.Errorf("failed to resolve %s:%s: %w", groupID, artifactID, fetchErr)
+		}
+		return Metadata{}, &notFoundError{repo: "any repository"}
 	}
 
 	last := ordered[len(ordered)-1]

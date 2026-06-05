@@ -5,11 +5,12 @@ import (
 	"sync"
 
 	"dimagor555.pro/maven-deps/gradle"
+	"dimagor555.pro/maven-deps/maven"
 	"dimagor555.pro/maven-deps/update"
 	"dimagor555.pro/maven-deps/version"
 )
 
-func resolveUpgrades(ctx context.Context, entries map[string]gradle.CatalogEntry, resolver dependencyResolver) []update.Upgrade {
+func resolveUpgrades(ctx context.Context, entries map[string]gradle.CatalogEntry, resolver dependencyResolver) ([]update.Upgrade, []resolveFailure) {
 	var targets []gradle.CatalogEntry
 	for _, e := range entries {
 		if e.Version != "" {
@@ -17,6 +18,7 @@ func resolveUpgrades(ctx context.Context, entries map[string]gradle.CatalogEntry
 		}
 	}
 	results := make([]update.Upgrade, len(targets))
+	failures := make([]*resolveFailure, len(targets))
 	sem := make(chan struct{}, maxConcurrency)
 	var wg sync.WaitGroup
 	wg.Add(len(targets))
@@ -25,7 +27,7 @@ func resolveUpgrades(ctx context.Context, entries map[string]gradle.CatalogEntry
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			results[i] = buildUpgrade(ctx, e, resolver)
+			results[i], failures[i] = buildUpgrade(ctx, e, resolver)
 		}(i, e)
 	}
 	wg.Wait()
@@ -35,21 +37,34 @@ func resolveUpgrades(ctx context.Context, entries map[string]gradle.CatalogEntry
 			out = append(out, r)
 		}
 	}
-	return out
+	var failed []resolveFailure
+	for _, f := range failures {
+		if f != nil {
+			failed = append(failed, *f)
+		}
+	}
+	return out, failed
 }
 
-func buildUpgrade(ctx context.Context, e gradle.CatalogEntry, resolver dependencyResolver) update.Upgrade {
+func buildUpgrade(ctx context.Context, e gradle.CatalogEntry, resolver dependencyResolver) (update.Upgrade, *resolveFailure) {
 	meta, err := resolver.Resolve(ctx, e.GroupID, e.ArtifactID)
 	if err != nil {
-		return update.Upgrade{}
+		if maven.IsNotFound(err) {
+			return update.Upgrade{}, nil
+		}
+		return update.Upgrade{}, &resolveFailure{
+			GroupID:    e.GroupID,
+			ArtifactID: e.ArtifactID,
+			Err:        err,
+		}
 	}
 	latest := version.FindLatestForCurrent(meta.Versions, e.Version)
 	if latest == "" || latest == e.Version {
-		return update.Upgrade{}
+		return update.Upgrade{}, nil
 	}
 	ut := version.GetUpgradeType(e.Version, latest)
 	if ut == version.None {
-		return update.Upgrade{}
+		return update.Upgrade{}, nil
 	}
 	return update.Upgrade{
 		Alias:         e.SourceAlias,
@@ -59,7 +74,7 @@ func buildUpgrade(ctx context.Context, e gradle.CatalogEntry, resolver dependenc
 		Current:       e.Version,
 		Latest:        latest,
 		Type:          string(ut),
-	}
+	}, nil
 }
 
 func applyPlan(content string, plan update.Result) (string, error) {
