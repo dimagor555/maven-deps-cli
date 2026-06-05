@@ -98,6 +98,7 @@ func (r Repository) doFetch(ctx context.Context, url, groupID, artifactID string
 	if err != nil {
 		return Metadata{}, fmt.Errorf("create request: %w", err)
 	}
+	req.Header.Set("User-Agent", "maven-deps (+https://github.com/dimagor555/maven-deps-cli)")
 
 	resp, err := httputil.Client.Do(req)
 	if err != nil {
