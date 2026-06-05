@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"sort"
-	"strings"
 	"sync"
 
 	"dimagor555.pro/maven-deps/maven"
@@ -135,18 +134,13 @@ func runOutdated(cmd *cobra.Command, _ []string) error {
 	var failures []resolveFailure
 	for item := range ch {
 		done++
-		if !jsonOutput {
-			fmt.Fprintf(os.Stderr, "\r%s", progressLine(done, total))
-		}
+		fmt.Fprintln(os.Stderr, progressLine(done, total))
 		if item.result != nil {
 			results = append(results, *item.result)
 		}
 		if item.failed != nil {
 			failures = append(failures, *item.failed)
 		}
-	}
-	if !jsonOutput && total > 0 {
-		fmt.Fprintf(os.Stderr, "\r%s\r", strings.Repeat(" ", 30))
 	}
 	sortResults(results)
 

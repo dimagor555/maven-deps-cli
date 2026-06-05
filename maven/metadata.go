@@ -1,6 +1,10 @@
 package maven
 
-import "encoding/xml"
+import (
+	"bytes"
+	"encoding/xml"
+	"io"
+)
 
 type Metadata struct {
 	GroupID    string   `xml:"groupId"`
@@ -17,8 +21,8 @@ type xmlMetadata struct {
 }
 
 type xmlVersioning struct {
-	Latest   string     `xml:"latest"`
-	Release  string     `xml:"release"`
+	Latest   string      `xml:"latest"`
+	Release  string      `xml:"release"`
 	Versions xmlVersions `xml:"versions"`
 }
 
@@ -28,7 +32,11 @@ type xmlVersions struct {
 
 func ParseMetadata(data []byte, groupID, artifactID string) (Metadata, error) {
 	var raw xmlMetadata
-	if err := xml.Unmarshal(data, &raw); err != nil {
+	dec := xml.NewDecoder(bytes.NewReader(data))
+	dec.CharsetReader = func(_ string, input io.Reader) (io.Reader, error) {
+		return input, nil
+	}
+	if err := dec.Decode(&raw); err != nil {
 		return Metadata{}, err
 	}
 	return Metadata{

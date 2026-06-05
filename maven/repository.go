@@ -15,9 +15,9 @@ import (
 )
 
 const (
-	maxAttempts   = 4
+	maxAttempts   = 3
 	baseBackoff   = 400 * time.Millisecond
-	maxBackoff    = 8 * time.Second
+	maxBackoff    = 4 * time.Second
 	rateLimitBase = 1500 * time.Millisecond
 )
 
@@ -77,7 +77,11 @@ func backoffDuration(attempt int, lastErr error) time.Duration {
 	var rl *rateLimitError
 	if errors.As(lastErr, &rl) {
 		if rl.retryAfter > 0 {
-			return rl.retryAfter + time.Duration(rand.Int63n(int64(rateLimitBase)))
+			d := rl.retryAfter
+			if d > maxBackoff {
+				d = maxBackoff
+			}
+			return d + time.Duration(rand.Int63n(int64(rateLimitBase)))
 		}
 		base = rateLimitBase
 	}
@@ -119,7 +123,11 @@ func (r Repository) doFetch(ctx context.Context, url, groupID, artifactID string
 		return Metadata{}, fmt.Errorf("read response from %s: %w", r.Name, err)
 	}
 
-	return ParseMetadata(body, groupID, artifactID)
+	m, err := ParseMetadata(body, groupID, artifactID)
+	if err != nil {
+		return Metadata{}, &parseError{repo: r.Name, err: err}
+	}
+	return m, nil
 }
 
 type notFoundError struct {
@@ -128,6 +136,19 @@ type notFoundError struct {
 
 func NewNotFoundError(repo string) error {
 	return &notFoundError{repo: repo}
+}
+
+type parseError struct {
+	repo string
+	err  error
+}
+
+func (e *parseError) Error() string {
+	return fmt.Sprintf("parse metadata from %s: %v", e.repo, e.err)
+}
+
+func (e *parseError) Unwrap() error {
+	return e.err
 }
 
 type rateLimitError struct {
@@ -165,7 +186,12 @@ func IsNotFound(err error) bool {
 }
 
 func isNonRetryable(err error) bool {
-	if _, ok := err.(*notFoundError); ok {
+	var nf *notFoundError
+	if errors.As(err, &nf) {
+		return true
+	}
+	var pe *parseError
+	if errors.As(err, &pe) {
 		return true
 	}
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {

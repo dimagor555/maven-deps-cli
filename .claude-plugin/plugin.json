@@ -1,6 +1,6 @@
 {
   "name": "maven-deps",
   "description": "Maven/Gradle dependency intelligence CLI",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "repository": "https://github.com/dimagor555/maven-deps-cli"
 }
